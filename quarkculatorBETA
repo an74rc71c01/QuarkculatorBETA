@@ -1,0 +1,215 @@
+import tkinter as tk
+from tkinter import messagebox, filedialog
+from tkinter.scrolledtext import ScrolledText
+from tkinter import ttk
+from PIL import Image, ImageTk
+import nltk
+from nltk.corpus import brown, movie_reviews, webtext, nps_chat
+import threading
+import time
+
+# Ensure the necessary corpora are downloaded
+nltk.download('brown')
+nltk.download('movie_reviews')
+nltk.download('webtext')
+nltk.download('nps_chat')
+
+def letter_to_custom_number(letter, mapping):
+    """Maps a letter to a number based on the selected mapping."""
+    return mapping.get(letter.upper(), 0)
+
+def calculate_word_value(word, mapping):
+    """Calculates the total numeric value of a word based on the custom mapping."""
+    return sum(letter_to_custom_number(letter, mapping) for letter in word)
+
+def precompute_sentence_values(mapping, corpora):
+    """Precompute the numeric value of each sentence/post in the given corpora."""
+    precomputed_values = []
+    
+    for corpus in corpora:
+        if corpus == nps_chat:
+            # NPS Chat Corpus is organized into posts instead of sentences
+            posts = corpus.posts()
+            for post in posts:
+                post_value = sum(calculate_word_value(word, mapping) for word in post if word.isalpha())
+                precomputed_values.append((post_value, ' '.join(post)))
+        else:
+            sentences = corpus.sents()
+            for sentence in sentences:
+                sentence_value = sum(calculate_word_value(word, mapping) for word in sentence if word.isalpha())
+                precomputed_values.append((sentence_value, ' '.join(sentence)))
+
+    return precomputed_values
+
+def find_matching_sentences(precomputed_values, input_value):
+    """Find sentences that match the input numeric value using precomputed sentence values."""
+    matching_sentences = []
+    total_sentences = len(precomputed_values)
+    
+    start_time = time.time()
+    
+    for i, (sentence_value, sentence) in enumerate(precomputed_values):
+        if sentence_value == input_value:
+            matching_sentences.append(sentence)
+        
+        # Reduce frequency of progress updates for faster performance
+        if i % 100 == 0 or i == total_sentences - 1:
+            progress['value'] = (i + 1) / total_sentences * 100
+            elapsed_time = time.time() - start_time
+            estimated_total_time = (elapsed_time / (i + 1)) * total_sentences
+            estimated_remaining_time = estimated_total_time - elapsed_time
+            progress_label.config(text=f"Progress: {progress['value']:.2f}% - Estimated time left: {int(estimated_remaining_time)} seconds")
+            root.update_idletasks()
+
+    return matching_sentences
+
+def display_sentence_matches():
+    """Displays the total numeric value of the input and finds matching sentences."""
+    word = entry.get()
+    if not word:
+        messagebox.showwarning("Input Required", "Please enter a word or number.")
+        return
+
+    selected_mapping = mappings[map_var.get()]
+    
+    try:
+        total_value = int(word)
+    except ValueError:
+        total_value = calculate_word_value(word, selected_mapping)
+    
+    result_label.config(text=f"Total numeric value: {total_value}")
+
+    # Reset progress bar and label
+    progress['value'] = 0
+    progress_label.config(text="Progress: 0%")
+
+    # Run the search in a separate thread to keep the GUI responsive
+    search_thread = threading.Thread(target=run_search, args=(total_value,))
+    search_thread.start()
+
+def run_search(total_value):
+    matching_sentences = find_matching_sentences(precomputed_values, total_value)
+    if matching_sentences:
+        matches_text = '\n\n'.join(matching_sentences)  # Display all matching sentences
+        match_text.delete(1.0, tk.END)  # Clear previous results
+        match_text.insert(tk.END, matches_text)
+    else:
+        match_text.delete(1.0, tk.END)
+        match_text.insert(tk.END, "No matching sentences found.")
+
+def save_results():
+    """Save the matching results to a text file."""
+    results = match_text.get(1.0, tk.END).strip()
+    if not results:
+        messagebox.showwarning("No Results", "There are no results to save.")
+        return
+    
+    file_path = filedialog.asksaveasfilename(defaultextension=".txt", filetypes=[("Text files", "*.txt")])
+    if file_path:
+        with open(file_path, 'w') as file:
+            file.write(results)
+        messagebox.showinfo("Saved", f"Results saved to {file_path}")
+
+def clear_all():
+    """Clear all input and output fields."""
+    entry.delete(0, tk.END)
+    match_text.delete(1.0, tk.END)
+    result_label.config(text="")
+    progress['value'] = 0
+    progress_label.config(text="Progress: 0%")
+
+def create_gui():
+    """Creates the GUI for the application."""
+    global root, entry, result_label, match_text, progress, progress_label, map_var, precomputed_values, mappings
+
+    root = tk.Tk()
+    root.title("Enhanced Sentence Value Matcher")
+    root.geometry("800x750")
+    root.configure(bg="#2e2e2e")  # Dark background
+
+    # Add the "Quarkculator" label
+    title_label = tk.Label(root, text="Quarkculator", font=("Helvetica", 28, "bold"), fg="green", bg="#2e2e2e")
+    title_label.pack(pady=10)
+
+    # Load and display the image
+    img = Image.open("quark.jpg")  # Replace with the full path if necessary
+    img = resize_image_to_fit(img, max_width=780, max_height=120)
+    photo = ImageTk.PhotoImage(img)
+
+    image_label = tk.Label(root, image=photo, bg="#2e2e2e")
+    image_label.image = photo  # Keep a reference to avoid garbage collection
+    image_label.pack(pady=10)
+
+    # Create and configure entry widget for word/number input
+    entry = tk.Entry(root, font=("Arial", 16))
+    entry.pack(pady=10)
+
+    # Mapping selection
+    map_var = tk.StringVar(value="AJS")
+    mappings = {
+        "AJS": {'A': 1, 'J': 1, 'S': 1, 'B': 2, 'K': 2, 'T': 2, 'C': 3, 'L': 3, 'U': 3, 'D': 4, 'M': 4, 'V': 4, 'E': 5, 'N': 5, 'W': 5, 'F': 6, 'O': 6, 'X': 6, 'G': 7, 'P': 7, 'Y': 7, 'H': 8, 'Q': 8, 'Z': 8, 'I': 9, 'R': 9},
+        "Simple": {chr(i): i - 64 for i in range(65, 91)}  # A=1, B=2, ..., Z=26
+    }
+    map_frame = tk.Frame(root, bg="#2e2e2e")
+    map_frame.pack(pady=10)
+    tk.Label(map_frame, text="Select Mapping:", font=("Arial", 14), fg="white", bg="#2e2e2e").pack(side=tk.LEFT)
+    for map_name in mappings:
+        tk.Radiobutton(map_frame, text=map_name, variable=map_var, value=map_name, font=("Arial", 12), fg="white", bg="#2e2e2e", selectcolor="#4e4e4e").pack(side=tk.LEFT, padx=5)
+
+    # Add a progress bar
+    progress = ttk.Progressbar(root, orient=tk.HORIZONTAL, length=700, mode='determinate')
+    progress.pack(pady=5)
+
+    # Add a label to show progress percentage and estimated time
+    progress_label = tk.Label(root, text="Progress: 0%", font=("Arial", 12), bg="#2e2e2e", fg="white")
+    progress_label.pack()
+
+    # Create and configure buttons
+    button_frame = tk.Frame(root, bg="#2e2e2e")
+    button_frame.pack(pady=10)
+    calculate_button = tk.Button(button_frame, text="Calculate Total Value", command=display_sentence_matches, font=("Arial", 14), bg="#4e4e4e", fg="white")
+    calculate_button.pack(side=tk.LEFT, padx=5)
+    clear_button = tk.Button(button_frame, text="Clear", command=clear_all, font=("Arial", 14), bg="#4e4e4e", fg="white")
+    clear_button.pack(side=tk.LEFT, padx=5)
+    save_button = tk.Button(button_frame, text="Save Results", command=save_results, font=("Arial", 14), bg="#4e4e4e", fg="white")
+    save_button.pack(side=tk.LEFT, padx=5)
+
+    # Create and configure label to display results
+    result_label = tk.Label(root, text="", font=("Arial", 14), bg="#2e2e2e", fg="white")
+    result_label.pack(pady=10)
+
+    # Create and configure scrolled text to display matching sentences
+    match_text = ScrolledText(root, width=90, height=20, font=("Arial", 12), bg="#1e1e1e", fg="white", wrap=tk.WORD)
+    match_text.pack(pady=10)
+
+    # Precompute sentence values before starting the GUI
+    corpora = [brown, movie_reviews, webtext, nps_chat]
+    selected_mapping = mappings[map_var.get()]
+    precomputed_values = precompute_sentence_values(selected_mapping, corpora)
+
+    # Run the main loop to display the GUI
+    root.mainloop()
+
+def resize_image_to_fit(image, max_width, max_height):
+    """Resize an image while maintaining its aspect ratio."""
+    original_width, original_height = image.size
+    aspect_ratio = original_width / original_height
+
+    if original_width > original_height:
+        new_width = min(original_width, max_width)
+        new_height = int(new_width / aspect_ratio)
+    else:
+        new_height = min(original_height, max_height)
+        new_width = int(new_height * aspect_ratio)
+
+    if new_width > max_width:
+        new_width = max_width
+        new_height = int(new_width / aspect_ratio)
+    if new_height > max_height:
+        new_height = max_height
+        new_width = int(new_height * aspect_ratio)
+
+    return image.resize((new_width, new_height), Image.LANCZOS)
+
+if __name__ == "__main__":
+    create_gui()
